@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kfake"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
@@ -45,21 +46,12 @@ func Test_ListMessages(t *testing.T) {
 	// create test topic and test data in the real redpanda cluster
 	_, kafkaAdmCl := createTestData(t, ctx, []string{testSeedBroker})
 
-	// fake cluster
-	fakeCluster, err := kfake.NewCluster(kfake.NumBrokers(1))
-	assert.Nil(t, err)
-
-	defer fakeCluster.Close()
-
-	// create test topic and test data in the fake redpanda cluster
-	_, _ = createTestData(t, ctx, fakeCluster.ListenAddrs())
-
 	type test struct {
 		name        string
 		useFake     bool
 		setup       func(context.Context)
 		input       *ListMessageRequest
-		expect      func(*mocks.MockIListMessagesProgress)
+		expect      func(*mocks.MockIListMessagesProgress, *kfake.Cluster)
 		expectError string
 		cleanup     func(context.Context)
 	}
@@ -77,7 +69,7 @@ func Test_ListMessages(t *testing.T) {
 				StartOffset:  -2,
 				MessageCount: 100,
 			},
-			expect: func(mockProgress *mocks.MockIListMessagesProgress) {
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, _ *kfake.Cluster) {
 				mockProgress.EXPECT().OnPhase("Get Partitions")
 				mockProgress.EXPECT().OnPhase("Get Watermarks and calculate consuming requests")
 				mockProgress.EXPECT().OnComplete(gomock.Any(), false)
@@ -94,7 +86,7 @@ func Test_ListMessages(t *testing.T) {
 				StartOffset:  -2,
 				MessageCount: 100,
 			},
-			expect: func(mockProgress *mocks.MockIListMessagesProgress) {
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, _ *kfake.Cluster) {
 				var msg *kafka.TopicMessage
 				var int64Type int64
 
@@ -114,7 +106,7 @@ func Test_ListMessages(t *testing.T) {
 				StartOffset:  10,
 				MessageCount: 1,
 			},
-			expect: func(mockProgress *mocks.MockIListMessagesProgress) {
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, _ *kfake.Cluster) {
 				var int64Type int64
 
 				mockProgress.EXPECT().OnPhase("Get Partitions")
@@ -133,7 +125,7 @@ func Test_ListMessages(t *testing.T) {
 				StartOffset:  10,
 				MessageCount: 5,
 			},
-			expect: func(mockProgress *mocks.MockIListMessagesProgress) {
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, _ *kfake.Cluster) {
 				var int64Type int64
 
 				mockProgress.EXPECT().OnPhase("Get Partitions")
@@ -157,7 +149,7 @@ func Test_ListMessages(t *testing.T) {
 				StartTimestamp: time.Date(2010, time.November, 11, 13, 0, 0, 0, time.UTC).UnixMilli(),
 				StartOffset:    StartOffsetTimestamp,
 			},
-			expect: func(mockProgress *mocks.MockIListMessagesProgress) {
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, _ *kfake.Cluster) {
 				var int64Type int64
 
 				mockProgress.EXPECT().OnPhase("Get Partitions")
@@ -177,7 +169,7 @@ func Test_ListMessages(t *testing.T) {
 				StartTimestamp: time.Date(2010, time.November, 10, 13, 10, 30, 0, time.UTC).UnixMilli(),
 				StartOffset:    StartOffsetTimestamp,
 			},
-			expect: func(mockProgress *mocks.MockIListMessagesProgress) {
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, _ *kfake.Cluster) {
 				var int64Type int64
 
 				mockProgress.EXPECT().OnPhase("Get Partitions")
@@ -200,7 +192,7 @@ func Test_ListMessages(t *testing.T) {
 				StartOffset:  -2,
 				MessageCount: 100,
 			},
-			expect: func(mockProgress *mocks.MockIListMessagesProgress) {
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, _ *kfake.Cluster) {
 				mockProgress.EXPECT().OnPhase("Get Partitions")
 			},
 			expectError: "failed to get partitions: UNKNOWN_TOPIC_OR_PARTITION: This server does not host this topic-partition.",
@@ -214,7 +206,7 @@ func Test_ListMessages(t *testing.T) {
 				StartOffset:  10,
 				MessageCount: 1,
 			},
-			expect: func(mockProgress *mocks.MockIListMessagesProgress) {
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, fakeCluster *kfake.Cluster) {
 				var int64Type int64
 
 				mockProgress.EXPECT().OnPhase("Get Partitions")
@@ -282,6 +274,125 @@ func Test_ListMessages(t *testing.T) {
 				})
 			},
 		},
+		{
+			name:    "metadata topic error",
+			useFake: true,
+			input: &ListMessageRequest{
+				TopicName:    "console_list_messages_topic_test",
+				PartitionID:  -1,
+				StartOffset:  15,
+				MessageCount: 1,
+			},
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, fakeCluster *kfake.Cluster) {
+				mockProgress.EXPECT().OnPhase("Get Partitions")
+
+				fakeCluster.Control(func(req kmsg.Request) (kmsg.Response, error, bool) {
+					fakeCluster.KeepControl()
+
+					rj, _ := json.Marshal(req)
+					fmt.Printf("!!! Got Request: %+T\n%+v\n\n", req, string(rj))
+
+					switch v := req.(type) {
+					case *kmsg.ApiVersionsRequest:
+						return nil, nil, false
+					case *kmsg.MetadataRequest:
+						assert.Len(t, v.Topics, 1)
+						assert.Equal(t, "console_list_messages_topic_test", *(v.Topics[0].Topic))
+
+						mdRes := v.ResponseKind().(*kmsg.MetadataResponse)
+						mdRes.Topics = make([]kmsg.MetadataResponseTopic, 1)
+						mdRes.Topics[0] = kmsg.NewMetadataResponseTopic()
+						mdRes.Topics[0].Topic = kmsg.StringPtr("console_list_messages_topic_test")
+						mdRes.Topics[0].Partitions = make([]kmsg.MetadataResponseTopicPartition, 1)
+						mdRes.Topics[0].Partitions[0].Partition = 0
+						mdRes.Topics[0].Partitions[0].Leader = 0
+						mdRes.Topics[0].Partitions[0].LeaderEpoch = 1
+						mdRes.Topics[0].Partitions[0].Replicas = make([]int32, 1)
+						mdRes.Topics[0].Partitions[0].Replicas[0] = 0
+						mdRes.Topics[0].Partitions[0].ISR = make([]int32, 1)
+						mdRes.Topics[0].Partitions[0].ISR[0] = 0
+
+						mdRes.Topics[0].ErrorCode = kerr.LeaderNotAvailable.Code
+
+						return mdRes, nil, true
+
+					default:
+						assert.Fail(t, fmt.Sprintf("unexpected call to fake kafka request %+T", v))
+
+						return nil, nil, false
+					}
+				})
+			},
+			expectError: "failed to get partitions: LEADER_NOT_AVAILABLE: There is no leader for this topic-partition as we are in the middle of a leadership election.",
+		},
+
+		{
+			name:    "list offset error",
+			useFake: true,
+			input: &ListMessageRequest{
+				TopicName:    "console_list_messages_topic_test",
+				PartitionID:  -1,
+				StartOffset:  16,
+				MessageCount: 1,
+			},
+			expect: func(mockProgress *mocks.MockIListMessagesProgress, fakeCluster *kfake.Cluster) {
+
+				var int64Type int64
+
+				mockProgress.EXPECT().OnPhase("Get Partitions")
+				mockProgress.EXPECT().OnPhase("Get Watermarks and calculate consuming requests")
+				mockProgress.EXPECT().OnPhase("Consuming messages")
+				mockProgress.EXPECT().OnMessage(matchesOrder("16")).Times(1)
+				mockProgress.EXPECT().OnMessageConsumed(gomock.AssignableToTypeOf(int64Type)).Times(1)
+				mockProgress.EXPECT().OnComplete(gomock.AssignableToTypeOf(int64Type), false)
+
+				fakeCluster.Control(func(req kmsg.Request) (kmsg.Response, error, bool) {
+					fakeCluster.KeepControl()
+
+					rj, _ := json.Marshal(req)
+					fmt.Printf("!!! Got Request: %+T\n%+v\n\n", req, string(rj))
+
+					switch v := req.(type) {
+					case *kmsg.ApiVersionsRequest:
+						return nil, nil, false
+					case *kmsg.MetadataRequest:
+						assert.Len(t, v.Topics, 1)
+						assert.Equal(t, "console_list_messages_topic_test", *(v.Topics[0].Topic))
+
+						return nil, nil, false
+
+					case *kmsg.ListOffsetsRequest:
+						loReq, ok := req.(*kmsg.ListOffsetsRequest)
+						assert.True(t, ok, "request is not a list offset request: %+T", req)
+
+						assert.Len(t, loReq.Topics, 1)
+						assert.Equal(t, "console_list_messages_topic_test", loReq.Topics[0].Topic)
+
+						assert.Len(t, loReq.Topics[0].Partitions, 1)
+						assert.Equal(t, int32(1), loReq.Topics[0].Partitions[0].MaxNumOffsets)
+
+						loRes := v.ResponseKind().(*kmsg.ListOffsetsResponse)
+						loRes.Topics = make([]kmsg.ListOffsetsResponseTopic, 1)
+						loRes.Topics[0] = kmsg.NewListOffsetsResponseTopic()
+						loRes.Topics[0].Topic = "console_list_messages_topic_test"
+						loRes.Topics[0].Partitions = make([]kmsg.ListOffsetsResponseTopicPartition, 1)
+						loRes.Topics[0].Partitions[0].Partition = 0
+						loRes.Topics[0].Partitions[0].LeaderEpoch = 1
+						loRes.Topics[0].Partitions[0].Timestamp = -1
+						loRes.Topics[0].Partitions[0].Offset = 0
+
+						loRes.Topics[0].Partitions[0].ErrorCode = kerr.NotLeaderForPartition.Code
+
+						return loRes, nil, true
+
+					default:
+						assert.Fail(t, fmt.Sprintf("unexpected call to fake kafka request %+T", v))
+
+						return nil, nil, false
+					}
+				})
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -294,6 +405,15 @@ func Test_ListMessages(t *testing.T) {
 			cfg := config.Config{}
 			cfg.SetDefaults()
 			cfg.MetricsNamespace = metricName
+
+			// fake cluster
+			fakeCluster, err := kfake.NewCluster(kfake.NumBrokers(1))
+			assert.Nil(t, err)
+
+			defer fakeCluster.Close()
+
+			// create test topic and test data in the fake redpanda cluster
+			_, _ = createTestData(t, ctx, fakeCluster.ListenAddrs())
 
 			fmt.Println("REAL ADDRS:", []string{testSeedBroker})
 			fmt.Println("FAKE ADDRS:", fakeCluster.ListenAddrs())
@@ -320,7 +440,11 @@ func Test_ListMessages(t *testing.T) {
 			}
 
 			if tc.expect != nil {
-				tc.expect(mockProgress)
+				if tc.useFake {
+					tc.expect(mockProgress, fakeCluster)
+				} else {
+					tc.expect(mockProgress, nil)
+				}
 			}
 
 			svc, err := NewService(cfg.Console, log, kafkaSvc, nil, nil)
