@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/cloudhut/connect-client"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/redpanda-data/console/backend/pkg/config"
 	"github.com/stretchr/testify/assert"
@@ -21,14 +23,16 @@ import (
 	"go.uber.org/zap"
 )
 
-var testSeedBroker string
+var testSeedBroker []string
+var testAdminAddress string
 
 const TEST_TOPIC_NAME = "test_redpanda_connect_topic"
+const CONNECT_TEST_NETWORK = "redpandaconnecttestnetwork"
 
 func Test_CreateConnector(t *testing.T) {
-	fmt.Println("TEST SEED BROKERS: " + testSeedBroker)
+	fmt.Printf("TEST SEED BROKERS: %+v\n", testSeedBroker)
 
-	kc := startConnect(t, testSeedBroker)
+	kc := startConnect(t, CONNECT_TEST_NETWORK, []string{"redpanda:9092"})
 	fmt.Printf("\n%+v\n", kc)
 
 	defer func() {
@@ -98,46 +102,56 @@ offset.storage.replication.factor=-1
 status.storage.replication.factor=-1
 offset.flush.interval.ms=1000
 producer.linger.ms=1
-producer.batch.size=131072`
+producer.batch.size=131072
+client.dns.lookup=resolve_canonical_bootstrap_servers_only`
 
-func startConnect(t *testing.T, bootstrapServers string) *Connect {
+func startConnect(t *testing.T, network string, bootstrapServers []string) *Connect {
 	t.Helper()
 
 	const waitTimeout = 9 * time.Minute
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 
-	g := LogConsumer{}
-
 	req := testcontainers.ContainerRequest{
 		Image:        "docker.cloudsmith.io/redpanda/cloudv2-dev/connectors:1.0.0-dev-1d15b96",
 		ExposedPorts: []string{"8083"},
 		Env: map[string]string{
 			"CONNECT_CONFIGURATION":     CONNECT_CONFIGURATION,
-			"CONNECT_BOOTSTRAP_SERVERS": bootstrapServers,
+			"CONNECT_BOOTSTRAP_SERVERS": strings.Join(bootstrapServers, ","),
 			"CONNECT_GC_LOG_ENABLED":    "false",
 			"CONNECT_HEAP_OPTS":         "-Xms512M -Xmx512M",
 			"CONNECT_LOG_LEVEL":         "info",
 		},
+		Networks: []string{
+			network,
+		},
+		NetworkAliases: map[string][]string{
+			network: {"connect"},
+		},
+		Hostname: "redpanda-connect",
+		HostConfigModifier: func(hc *container.HostConfig) {
+			hc.NetworkMode = "bridge"
+		},
 		WaitingFor: wait.ForAll(
-			wait.ForLog("Kafka Connect started").
+			wait.ForHTTP("/").WithPort("8083/tcp").
 				WithPollInterval(500 * time.Millisecond).
 				WithStartupTimeout(waitTimeout),
+			// WithResponseMatcher(func(body io.Reader) bool {
+			// 	fmt.Println("response body")
+			// 	data, _ := io.ReadAll(body)
+			// 	fmt.Println(string(data))
+			// 	return true
+			// }),
+			// wait.ForLog("Kafka Connect started").
+			// 	WithPollInterval(500 * time.Millisecond).
+			// 	WithStartupTimeout(waitTimeout),
 		),
 	}
 
 	connectContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
-		Started:          false,
-		Logger:           &g,
+		Started:          true,
 	})
-	require.NoError(t, err)
-
-	connectContainer.FollowOutput(&g) // must be called before StarLogProducer
-	err = connectContainer.StartLogProducer(ctx)
-	require.NoError(t, err)
-
-	err = connectContainer.Start(ctx)
 	require.NoError(t, err)
 
 	connectPort, err := connectContainer.MappedPort(ctx, nat.Port("8083"))
@@ -152,20 +166,7 @@ func startConnect(t *testing.T, bootstrapServers string) *Connect {
 		connectHost: connectHost,
 	}
 
-	err = connectContainer.StopLogProducer()
-	require.NoError(t, err)
-
 	return &kc
-}
-
-type LogConsumer struct{}
-
-func (g *LogConsumer) Accept(l testcontainers.Log) {
-	fmt.Println("LOG:", string(l.Content))
-}
-
-func (g *LogConsumer) Printf(format string, v ...interface{}) {
-	fmt.Printf(format, v...)
 }
 
 type Connect struct {
@@ -175,16 +176,54 @@ type Connect struct {
 	connectHost string
 }
 
+func WithNetwork(network, networkAlias string) testcontainers.CustomizeRequestOption {
+	return func(req *testcontainers.GenericContainerRequest) {
+		if len(req.Networks) == 0 {
+			req.Networks = []string{}
+		}
+		req.Networks = append(req.Networks, network)
+
+		if networkAlias != "" {
+			if len(req.NetworkAliases) == 0 {
+				req.NetworkAliases = map[string][]string{}
+			}
+
+			req.NetworkAliases[network] = []string{networkAlias}
+		}
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(func() int {
 		ctx := context.Background()
-		container, err := redpanda.RunContainer(ctx)
+
+		testNetwork, err := testcontainers.GenericNetwork(ctx, testcontainers.GenericNetworkRequest{
+			// ProviderType: testcontainers.ProviderDocker,
+			NetworkRequest: testcontainers.NetworkRequest{
+				Name:           CONNECT_TEST_NETWORK,
+				CheckDuplicate: true,
+			},
+		})
+		if err != nil {
+			panic(err)
+		}
+
+		container, err := redpanda.RunContainer(ctx,
+			WithNetwork(CONNECT_TEST_NETWORK, "redpanda"),
+			testcontainers.WithHostConfigModifier(func(hostConfig *container.HostConfig) {
+				hostConfig.NetworkMode = "bridge"
+			}),
+		)
 		if err != nil {
 			panic(err)
 		}
 
 		defer func() {
 			if err := container.Terminate(ctx); err != nil {
+				panic(err)
+			}
+
+			if err := testNetwork.Remove(ctx); err != nil {
 				panic(err)
 			}
 		}()
@@ -194,7 +233,12 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 
-		testSeedBroker = seedBroker
+		testSeedBroker = []string{seedBroker}
+
+		testAdminAddress, err = container.AdminAPIAddress(ctx)
+		if err != nil {
+			panic(err)
+		}
 
 		// create a long lived stock test topic
 		kafkaCl, err := kgo.NewClient(
