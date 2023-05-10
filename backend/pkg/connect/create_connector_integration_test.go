@@ -193,6 +193,12 @@ func WithNetwork(network, networkAlias string) testcontainers.CustomizeRequestOp
 	}
 }
 
+func WithHostname(hostname string) testcontainers.CustomizeRequestOption {
+	return func(req *testcontainers.GenericContainerRequest) {
+		req.Hostname = hostname
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(func() int {
 		ctx := context.Background()
@@ -210,6 +216,7 @@ func TestMain(m *testing.M) {
 
 		container, err := redpanda.RunContainer(ctx,
 			WithNetwork(CONNECT_TEST_NETWORK, "redpanda"),
+			WithHostname("redpanda"),
 			testcontainers.WithHostConfigModifier(func(hostConfig *container.HostConfig) {
 				hostConfig.NetworkMode = "bridge"
 			}),
