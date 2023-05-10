@@ -2,15 +2,13 @@ module github.com/redpanda-data/console/backend
 
 go 1.20
 
-replace github.com/testcontainers/testcontainers-go => github.com/weeco/testcontainers-go v0.0.0-20230424171910-b32bcdf703c9
-
-replace github.com/testcontainers/testcontainers-go/modules/redpanda => github.com/weeco/testcontainers-go/modules/redpanda v0.0.0-20230424171910-b32bcdf703c9
-
 require (
 	github.com/basgys/goxml2json v1.1.0
 	github.com/bmizerany/assert v0.0.0-20160611221934-b7ed37b82869
 	github.com/cloudhut/common v0.8.0
 	github.com/cloudhut/connect-client v0.0.0-20230417124247-963e5bcdfee7
+	github.com/docker/docker v23.0.5+incompatible
+	github.com/docker/go-connections v0.4.0
 	github.com/dop251/goja v0.0.0-20230427124612-428fc442ff5f
 	github.com/go-chi/chi/v5 v5.0.8
 	github.com/go-chi/cors v1.2.1
@@ -31,9 +29,11 @@ require (
 	github.com/prometheus/client_golang v1.15.0
 	github.com/redpanda-data/redpanda/src/go/rpk v0.0.0-20230502073202-367d8130cd94
 	github.com/stretchr/testify v1.8.2
-	github.com/testcontainers/testcontainers-go/modules/redpanda v0.0.0-00010101000000-000000000000
+	github.com/testcontainers/testcontainers-go v0.20.1
+	github.com/testcontainers/testcontainers-go/modules/redpanda v0.20.1
 	github.com/twmb/franz-go v1.13.4-0.20230503140309-bf5970577daf
 	github.com/twmb/franz-go/pkg/kadm v1.8.2-0.20230503140309-bf5970577daf
+	github.com/twmb/franz-go/pkg/kfake v0.0.0-20230508025141-88d5c46db15b
 	github.com/twmb/franz-go/pkg/kmsg v1.5.0
 	github.com/twmb/franz-go/pkg/sasl/kerberos v1.1.0
 	github.com/twmb/go-cache v1.0.0
@@ -63,8 +63,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.9.0 // indirect
 	github.com/docker/distribution v2.8.1+incompatible // indirect
-	github.com/docker/docker v23.0.3+incompatible // indirect
-	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
@@ -115,8 +113,6 @@ require (
 	github.com/spf13/afero v1.9.5 // indirect
 	github.com/spf13/cobra v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/testcontainers/testcontainers-go v0.19.0 // indirect
-	github.com/twmb/franz-go/pkg/kfake v0.0.0-20230508025141-88d5c46db15b // indirect
 	github.com/twmb/tlscfg v1.2.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
