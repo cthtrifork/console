@@ -72,7 +72,7 @@ func Test_CreateConnector(t *testing.T) {
 			"kafka.topic":                               "httpbin-input",
 			"key.converter":                             "org.apache.kafka.connect.json.JsonConverter",
 			"key.converter.schemas.enable":              "false",
-			"name":                                      "http-source-connector-nbtu",
+			"name":                                      "http_connect_input",
 			"topic.creation.default.partitions":         "1",
 			"topic.creation.default.replication.factor": "1",
 			"topic.creation.enable":                     "true",
@@ -108,7 +108,7 @@ client.dns.lookup=resolve_canonical_bootstrap_servers_only`
 func startConnect(t *testing.T, network string, bootstrapServers []string) *Connect {
 	t.Helper()
 
-	const waitTimeout = 9 * time.Minute
+	const waitTimeout = 5 * time.Minute
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 
@@ -136,15 +136,6 @@ func startConnect(t *testing.T, network string, bootstrapServers []string) *Conn
 			wait.ForHTTP("/").WithPort("8083/tcp").
 				WithPollInterval(500 * time.Millisecond).
 				WithStartupTimeout(waitTimeout),
-			// WithResponseMatcher(func(body io.Reader) bool {
-			// 	fmt.Println("response body")
-			// 	data, _ := io.ReadAll(body)
-			// 	fmt.Println(string(data))
-			// 	return true
-			// }),
-			// wait.ForLog("Kafka Connect started").
-			// 	WithPollInterval(500 * time.Millisecond).
-			// 	WithStartupTimeout(waitTimeout),
 		),
 	}
 
@@ -215,6 +206,7 @@ func TestMain(m *testing.M) {
 		}
 
 		container, err := redpanda.RunContainer(ctx,
+			redpanda.KafkaAdvertisedExternalHostname("redpanda"),
 			WithNetwork(CONNECT_TEST_NETWORK, "redpanda"),
 			WithHostname("redpanda"),
 			testcontainers.WithHostConfigModifier(func(hostConfig *container.HostConfig) {
