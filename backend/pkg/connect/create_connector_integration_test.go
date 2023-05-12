@@ -103,7 +103,7 @@ status.storage.replication.factor=-1
 offset.flush.interval.ms=1000
 producer.linger.ms=1
 producer.batch.size=131072
-client.dns.lookup=resolve_canonical_bootstrap_servers_only`
+`
 
 func startConnect(t *testing.T, network string, bootstrapServers []string) *Connect {
 	t.Helper()
@@ -113,6 +113,7 @@ func startConnect(t *testing.T, network string, bootstrapServers []string) *Conn
 	defer cancel()
 
 	req := testcontainers.ContainerRequest{
+		Name:         "redpanda-connect",
 		Image:        "docker.cloudsmith.io/redpanda/cloudv2-dev/connectors:1.0.0-dev-1d15b96",
 		ExposedPorts: []string{"8083"},
 		Env: map[string]string{
@@ -126,11 +127,11 @@ func startConnect(t *testing.T, network string, bootstrapServers []string) *Conn
 			network,
 		},
 		NetworkAliases: map[string][]string{
-			network: {"connect"},
+			network: {"redpanda-connect"},
 		},
 		Hostname: "redpanda-connect",
 		HostConfigModifier: func(hc *container.HostConfig) {
-			hc.NetworkMode = "bridge"
+			hc.NetworkMode = "local_default"
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForHTTP("/").WithPort("8083/tcp").
@@ -167,19 +168,19 @@ type Connect struct {
 	connectHost string
 }
 
-func WithNetwork(network, networkAlias string) testcontainers.CustomizeRequestOption {
+func WithNetwork(network string, networkAlias []string) testcontainers.CustomizeRequestOption {
 	return func(req *testcontainers.GenericContainerRequest) {
 		if len(req.Networks) == 0 {
 			req.Networks = []string{}
 		}
 		req.Networks = append(req.Networks, network)
 
-		if networkAlias != "" {
+		if len(networkAlias) > 0 {
 			if len(req.NetworkAliases) == 0 {
 				req.NetworkAliases = map[string][]string{}
 			}
 
-			req.NetworkAliases[network] = []string{networkAlias}
+			req.NetworkAliases[network] = append(req.NetworkAliases[network], networkAlias...)
 		}
 	}
 }
@@ -190,12 +191,18 @@ func WithHostname(hostname string) testcontainers.CustomizeRequestOption {
 	}
 }
 
+func WithName(name string) testcontainers.CustomizeRequestOption {
+	return func(req *testcontainers.GenericContainerRequest) {
+		req.Name = name
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(func() int {
 		ctx := context.Background()
 
 		testNetwork, err := testcontainers.GenericNetwork(ctx, testcontainers.GenericNetworkRequest{
-			// ProviderType: testcontainers.ProviderDocker,
+			ProviderType: testcontainers.ProviderDocker,
 			NetworkRequest: testcontainers.NetworkRequest{
 				Name:           CONNECT_TEST_NETWORK,
 				CheckDuplicate: true,
@@ -206,11 +213,12 @@ func TestMain(m *testing.M) {
 		}
 
 		container, err := redpanda.RunContainer(ctx,
-			redpanda.KafkaAdvertisedExternalHostname("redpanda"),
-			WithNetwork(CONNECT_TEST_NETWORK, "redpanda"),
+			WithName("local-redpanda"),
+			WithNetwork(CONNECT_TEST_NETWORK, []string{"redpanda", "local-redpanda"}),
 			WithHostname("redpanda"),
+			redpanda.KafkaAdvertisedExternalHostname("redpanda"),
 			testcontainers.WithHostConfigModifier(func(hostConfig *container.HostConfig) {
-				hostConfig.NetworkMode = "bridge"
+				hostConfig.NetworkMode = "local_default"
 			}),
 		)
 		if err != nil {
