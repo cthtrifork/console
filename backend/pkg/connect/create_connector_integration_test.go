@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ const CONNECT_TEST_NETWORK = "redpandaconnecttestnetwork"
 func Test_CreateConnector(t *testing.T) {
 	fmt.Printf("TEST SEED BROKERS: %+v\n", testSeedBroker)
 
-	kc := startConnect(t, CONNECT_TEST_NETWORK, []string{"redpanda:9092"})
+	kc := startConnect(t, CONNECT_TEST_NETWORK, []string{"redpanda:29092"})
 	fmt.Printf("\n%+v\n", kc)
 
 	defer func() {
@@ -52,7 +53,7 @@ func Test_CreateConnector(t *testing.T) {
 		Clusters: []config.ConnectCluster{
 			{
 				Name: "redpanda_connect",
-				URL:  "http://" + kc.connectHost + ":" + string(kc.connectPort),
+				URL:  "http://" + kc.connectHost + ":" + string(kc.connectPort.Port()),
 			},
 		},
 	}, log)
@@ -81,7 +82,9 @@ func Test_CreateConnector(t *testing.T) {
 		},
 	})
 
-	assert.NoError(t, connectErr.Err)
+	if connectErr != nil {
+		assert.NoError(t, connectErr.Err)
+	}
 
 	rj, _ := json.Marshal(res)
 	fmt.Println("RES:")
@@ -132,6 +135,14 @@ func startConnect(t *testing.T, network string, bootstrapServers []string) *Conn
 		Hostname: "redpanda-connect",
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.NetworkMode = "local_default"
+			hc.PortBindings = nat.PortMap{
+				nat.Port("8083/tcp"): []nat.PortBinding{
+					{
+						HostIP:   "",
+						HostPort: strconv.FormatInt(int64(nat.Port("8083/tcp").Int()), 10),
+					},
+				},
+			}
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForHTTP("/").WithPort("8083/tcp").
@@ -219,6 +230,33 @@ func TestMain(m *testing.M) {
 			redpanda.KafkaAdvertisedExternalHostname("redpanda"),
 			testcontainers.WithHostConfigModifier(func(hostConfig *container.HostConfig) {
 				hostConfig.NetworkMode = "local_default"
+
+				hostConfig.PortBindings = nat.PortMap{
+					nat.Port("9092/tcp"): []nat.PortBinding{
+						{
+							HostIP:   "",
+							HostPort: strconv.FormatInt(int64(nat.Port("9092/tcp").Int()), 10),
+						},
+					},
+					nat.Port("9644/tcp"): []nat.PortBinding{
+						{
+							HostIP:   "",
+							HostPort: strconv.FormatInt(int64(nat.Port("9644/tcp").Int()), 10),
+						},
+					},
+					nat.Port("8081/tcp"): []nat.PortBinding{
+						{
+							HostIP:   "",
+							HostPort: strconv.FormatInt(int64(nat.Port("8081/tcp").Int()), 10),
+						},
+					},
+					nat.Port("29092/tcp"): []nat.PortBinding{
+						{
+							HostIP:   "",
+							HostPort: strconv.FormatInt(int64(nat.Port("29092/tcp").Int()), 10),
+						},
+					},
+				}
 			}),
 		)
 		if err != nil {
