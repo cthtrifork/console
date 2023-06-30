@@ -29,7 +29,7 @@ import { ColumnList, FilterEntry, PreviewTagV2, PartitionOffsetOrigin } from '..
 import { uiState } from '../../../../state/uiState';
 import { AnimatePresence, animProps_span_messagesStatus, MotionDiv, MotionSpan } from '../../../../utils/animationProps';
 import '../../../../utils/arrayExtensions';
-import { IsDev, isServerless } from '../../../../utils/env';
+import { IsDev } from '../../../../utils/env';
 import { isClipboardAvailable } from '../../../../utils/featureDetection';
 import { FilterableDataSource } from '../../../../utils/filterableDataSource';
 import { sanitizeString, wrapFilterFragment } from '../../../../utils/filterHelper';
@@ -49,6 +49,7 @@ import { CollapsedFieldProps } from '@textea/json-viewer';
 import { Button, Input, InputGroup, Switch, Alert, AlertIcon, Tabs as RpTabs, Box, SearchField } from '@redpanda-data/ui';
 import { MdExpandMore } from 'react-icons/md';
 import { SingleSelect } from '../../../misc/Select';
+import { isServerless } from '../../../../config';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -456,7 +457,7 @@ export class TopicMessageView extends Component<TopicMessageViewProps> {
                         <SettingFilled style={IsColumnSettingsEnabled ? { color: 'hsl(255 15% 65%)' } : { color: '#a092a0' }} />
                     </Tooltip>;
                 },
-                render: (_text, record) => !record.value.isPayloadNull && (
+                render: (_text, record) => (
                     <NoClipboardPopover placement="left">
                         <div> {/* the additional div is necessary because popovers do not trigger on disabled elements, even on hover */}
                             <Dropdown disabled={!isClipboardAvailable} overlayClassName="disableAnimation" overlay={this.copyDropdown(record)} trigger={['click']}>
@@ -572,10 +573,10 @@ export class TopicMessageView extends Component<TopicMessageViewProps> {
 
     copyDropdown = (record: TopicMessage) => (
         <Menu>
-            <Menu.Item key="0" onClick={() => copyMessage(record, 'jsonKey')}>
+            <Menu.Item key="0" disabled={record.key.isPayloadNull} onClick={() => copyMessage(record, 'jsonKey')}>
                 Copy Key
             </Menu.Item>
-            <Menu.Item key="2" onClick={() => copyMessage(record, 'jsonValue')}>
+            <Menu.Item key="2" disabled={record.value.isPayloadNull} onClick={() => copyMessage(record, 'jsonValue')}>
                 Copy Value
             </Menu.Item>
             <Menu.Item key="4" onClick={() => copyMessage(record, 'timestamp')}>
